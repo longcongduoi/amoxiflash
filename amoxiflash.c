@@ -487,8 +487,16 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 	return 0;
 }
 
+int check_file_ecc(char *filename) {
+	return 1;
+}
+
+void usb_exit_handler(void) {
+	usb_close(h);
+}
+
 void usage(char *progname) {
-	fprintf(stderr, "Usage: %s -[tvwd] [-b blocksize] [-f filename] command\n", progname);
+	fprintf(stderr, "Usage: %s command -[tvwd] [-b blocksize] [-f filename]\n", progname);
 	fprintf(stderr, "          -t            test mode -- do not erase or write\n");
 	fprintf(stderr, "          -v            verify every byte of written data\n");
 	fprintf(stderr, "          -w            wait for status after programming\n");
@@ -497,6 +505,7 @@ void usage(char *progname) {
 	fprintf(stderr, "          -f filename   file to use for reading or writing data\n");
 	fprintf(stderr, "          -s blockno    start block -- skip this number of blocks before proceeding\n");
 	fprintf(stderr, "\nValid commands are:\n");
+	fprintf(stderr, "\n         check        check ECC data in file\n");
 	fprintf(stderr, "\n         dump         read from flash chip and dump to file\n");
 	fprintf(stderr, "\n         program      compare file to flash contents, reprogram flash to match file\n");
 	exit(1);	
@@ -511,7 +520,9 @@ int main (int argc,char **argv)
 	unsigned char recv_buffer[1024];
 	char ch;
 	char *filename = NULL, *progname = argv[0];
-
+	if (argc < 2) usage(argv[0]);
+	char *command = argv[1];
+	optind = 2; // skip cover command
 	
 	while ((ch = getopt(argc, argv, "b:tvwdf:s:q")) != -1) {
 		switch (ch) {
@@ -525,13 +536,24 @@ int main (int argc,char **argv)
 			case 'q': quick_check = 1; break;
             case '?':
             default:
-                usage(argv[0]);
+                usage(progname);
          }
 	}
 	argc -= optind;
 	argv += optind;
+
+	if (!strcmp(command, "check")) {
+		if (!filename) {
+			fprintf(stderr, "Error: check requires a filename\n");
+			usage(progname);
+		}
+
+		retval = check_file_ecc(filename);
+		exit(retval);
+	}
 		
 	usb_init();
+	atexit(usb_exit_handler);
 //	usb_set_debug(2);
  	if ((h = locate_infectus())==0) 
 	{
@@ -539,8 +561,6 @@ int main (int argc,char **argv)
 		return (-1);
 	}
 
-	
-	  
 	unsigned int flashid = 0;
 	infectus_reset();
 	infectus_get_version();
@@ -575,61 +595,59 @@ int main (int argc,char **argv)
 	}
 
 	start_time = time(NULL);
-	for(argno=0; argno < argc; argno++) {
-		if(!strcmp(argv[argno], "program")) {
-			int blockno = start_block;
+	if(!strcmp(command, "program")) {
+		int blockno = start_block;
 
-			if (!filename) {
-				fprintf(stderr, "Error: you must specify a filename to program\n");
-				usage(progname);
-			}
-			printf("Programming file %s into flash\n", filename);
-			FILE *fp = fopen(filename, "rb");
-			if(!fp) {
-				perror("Couldn't open file: ");
-				break;
-			}
-			fseek(fp, 0, SEEK_END);
-			off_t file_length = ftello(fp);
-			fseek(fp, 0, SEEK_SET);
-			u64 num_pages = file_length / 2112;
-			printf("File size: %llu bytes / %llu pages / %llu blocks\n", file_length, num_pages, num_pages / 64);
-			for (; blockno < (num_pages / 64); blockno++) {
-				flash_program_block(fp, blockno);
-			}
-			fclose(fp);
-			continue;
+		if (!filename) {
+			fprintf(stderr, "Error: you must specify a filename to program\n");
+			usage(progname);
 		}
+		printf("Programming file %s into flash\n", filename);
+		FILE *fp = fopen(filename, "rb");
+		if(!fp) {
+			perror("Couldn't open file: ");
+			exit(1);
+		}
+		fseek(fp, 0, SEEK_END);
+		off_t file_length = ftello(fp);
+		fseek(fp, 0, SEEK_SET);
+		u64 num_pages = file_length / 2112;
+		printf("File size: %llu bytes / %llu pages / %llu blocks\n", file_length, num_pages, num_pages / 64);
+		for (; blockno < (num_pages / 64); blockno++) {
+			flash_program_block(fp, blockno);
+		}
+		fclose(fp);
+		exit(0);
+	}
 
-		if(!strcmp(argv[argno], "dump")) {
-			unsigned long long begin, length;
-			unsigned int blockno;
+	if(!strcmp(command, "dump")) {
+		unsigned long long begin, length;
+		unsigned int blockno;
 
-			blockno = start_block;
-			length = 553648128ULL - blockno * 0x40ULL * 2112ULL;
-			printf("Dumping flash @ 0x%llx (0x%llx bytes) into %s\n", 
+		blockno = start_block;
+		length = 553648128ULL - blockno * 0x40ULL * 2112ULL;
+		printf("Dumping flash @ 0x%llx (0x%llx bytes) into %s\n", 
 				blockno*0x40ULL*2112ULL, length, filename);
 
-			FILE *fp = fopen(filename, "w");
-			if(!fp) {
-				perror("Couldn't open file for writing: ");
-				break;
-			}
-			for(; blockno < 4096; blockno++) {
-//				printf("\rDumping block %x", blockno); fflush(stdout);
-				flash_dump_block(fp, blockno);
-			}
-			printf("Done!\n");
-			fclose(fp);
-			continue;
+		FILE *fp = fopen(filename, "w");
+		if(!fp) {
+			perror("Couldn't open file for writing: ");
+			exit(1);
 		}
+		for(; blockno < 4096; blockno++) {
+//			printf("\rDumping block %x", blockno); fflush(stdout);
+			flash_dump_block(fp, blockno);
+		}
+		printf("Done!\n");
+		fclose(fp);
+		exit(0);
+	}
 #if 0		
-		if(!strcmp(argv[argno], "erase")) {
-			argno++;
-			int blockno = strtol(argv[argno], NULL, 0);
-			infectus_eraseblock(blockno);
-			continue;
-		}
+	if(!strcmp(argv[argno], "erase")) {
+		int blockno = strtol(argv[argno], NULL, 0);
+		infectus_eraseblock(blockno);
+		continue;
+	}
 
 		if(!strcmp(argv[argno], "write")) {
 			unsigned long long begin, length, offset;
@@ -657,11 +675,9 @@ int main (int argc,char **argv)
 			continue;
 		}	
 #endif
-		printf("Unknown command '%s'\n", argv[argno]);
-		usage(progname);
-	}
-	usb_close(h);
-	exit(0);
+	printf("Unknown command '%s'\n", command);
+	usage(progname);
+	exit(1);  // not reached
 }	
 
 usb_dev_handle *locate_infectus(void) 
