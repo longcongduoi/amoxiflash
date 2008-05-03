@@ -576,13 +576,6 @@ int main (int argc,char **argv)
 
 	start_time = time(NULL);
 	for(argno=0; argno < argc; argno++) {
-		if(!strcmp(argv[argno], "erase")) {
-			argno++;
-			int blockno = strtol(argv[argno], NULL, 0);
-			infectus_eraseblock(blockno);
-			continue;
-		}
-
 		if(!strcmp(argv[argno], "program")) {
 			int blockno = start_block;
 
@@ -631,6 +624,13 @@ int main (int argc,char **argv)
 			continue;
 		}
 #if 0		
+		if(!strcmp(argv[argno], "erase")) {
+			argno++;
+			int blockno = strtol(argv[argno], NULL, 0);
+			infectus_eraseblock(blockno);
+			continue;
+		}
+
 		if(!strcmp(argv[argno], "write")) {
 			unsigned long long begin, length, offset;
 			char *filename;
