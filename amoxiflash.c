@@ -207,26 +207,26 @@ int infectus_reset() {
 }
 
 /* Version part 1: ? */
-int infectus_getvers1(void) {
+int infectus_get_version(void) {
 	u8 buf[128];
 	int ret;
 	memcpy(buf, "\x45\x13\x01\x00\x00\x00\x00\x00", 8);
 
 	ret=infectus_sendcommand(buf, 8, 128);
-	printf("infectus_getvers1 = ");
-	hexdump(buf, ret);
+	printf("Infectus version (?) = %hhx\n", buf[1]);
+//	hexdump(buf, ret);
 	return 0;
 }
 
 /* Version part 2: ? */
-int infectus_getvers2(void) {
+int infectus_get_loader_version(void) {
 	u8 buf[128];
 	int ret;
 	memcpy(buf, "\x4c\x07\x00\x00\x00\x00\x00\x00", 8);
 
 	ret = infectus_sendcommand(buf, 8, 128);
-	printf("infectus_getvers2 = ");
-	hexdump(buf, ret);
+	printf("Infectus Loader version = %hhu.%hhu", buf[1], buf[2]);
+//	hexdump(buf, ret);
 	return 0;
 }
 
@@ -543,9 +543,9 @@ int main (int argc,char **argv)
 	  
 	unsigned int flashid = 0;
 	infectus_reset();
-	infectus_getvers1();
+	infectus_get_version();
 	usleep(1000);
-	infectus_getvers2();
+	infectus_get_loader_version();
 	usleep(1000);
 	infectus_check_pld_id();
 	usleep(1000);
@@ -565,10 +565,13 @@ int main (int argc,char **argv)
 		case 0xADDC: printf("Detected Hynix 512Mbyte flash\n"); break;
 		case 0xECDC: printf("Detected Samsung 512Mbyte flash\n"); break;
 		case 0x98DC: printf("Detected Toshiba 512Mbyte flash\n"); break;
+		case 0:
+			printf("No flash chip detected; are you sure target device is powered on?\n");
+			exit(1);
 		default: 
-		printf("Unknown flash ID %04x\n", flashid);
-		printf("If this is correct, please notify the author.\n");
-		exit(1);
+			printf("Unknown flash ID %04x\n", flashid);
+			printf("If this is correct, please notify the author.\n");
+			exit(1);
 	}
 
 	start_time = time(NULL);
