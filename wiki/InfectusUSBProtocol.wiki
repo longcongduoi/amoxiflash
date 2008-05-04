@@ -1,0 +1,29 @@
+#summary The USB Protocol used to control the Infectus chip.
+= Introduction =
+
+The Infectus chip communicates with the host system using a fairly simple USB protocol carried over two bulk endpoints -- one in each direction.
+
+Commands are sent in small binary packets.  The first byte indicates the category of command; the second byte indicates the actual command, and the rest of the bytes carry any parameters.  Every command is at least 8 bytes long, and padded with zeroes as necessary.  The length and parameter format must be determined by looking at the first two bytes.
+
+All responses seem to begin with the byte 0xFF -- this is probably a return value.
+
+= Initialization  - 0x45 =
+0x45 commands seem to be handled by the SiLabs MCU onboard the Infectus chip.
+
+ 45 15 00 00 00 00 00 00     -- reset chip
+ 45 13 01 00 00 00 00 00     -- get chip revision?  returns 0x82 for me
+ 45 14 xx 00 00 00 00 00     -- select NAND bank -- xx should be either 00 or 01, depending on which chip in a dual-chip configuration should be used.   Even if only a single NAND chip is present, this command must be sent to initialize the chip.
+
+= PLD Info queries =
+0x4C commands retrieve info about the programing of the chip.
+
+ 4c 07 00 00 00 00 00 00     -- get "loader version" number
+ 4c 15 00 00 00 00 00 00     -- get "PLD ID" -- this identifies which "Actel program" has been loaded onto the device
+
+= NAND commands ==
+The Infectus software sends raw NAND commands to the chip.  This is a good thing, because it means we should be able to add support for any NAND flash chip that we can obtain a datasheet for.
+
+0x4e:  Send command to NAND chip
+  4e 00 00 00 00 00 00 xx yy zz ...     -- xx is length of command, yy zz ... is actual commands
+
+(To Be Continued...)  
