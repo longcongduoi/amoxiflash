@@ -55,7 +55,7 @@ static void calc_ecc(u8 *data, u8 *ecc)
 	ecc[3] = a1 >> 8;
 }
 
-char * calc_page_ecc(u8 *data)
+u8 * calc_page_ecc(u8 *data)
 {
 	static u8 ecc[16];
 

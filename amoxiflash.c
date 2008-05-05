@@ -233,7 +233,7 @@ int infectus_get_loader_version(void) {
 	memcpy(buf, "\x4c\x07\x00\x00\x00\x00\x00\x00", 8);
 
 	ret = infectus_sendcommand(buf, 8, 128);
-	printf("Infectus Loader version = %hhu.%hhu", buf[1], buf[2]);
+	printf("Infectus Loader version = %hhu.%hhu\n", buf[1], buf[2]);
 //	hexdump(buf, ret);
 	return 0;
 }
@@ -366,10 +366,18 @@ int mem_compare(u8 *buf1, u8 *buf2, int size) {
 }
 
 int flash_compare(FILE *fp, unsigned int pageno) {
-	u8 buf1[2112], buf2[2112], buf3[2112];
+	u8 buf1[2112], buf2[2112];
+//	u8 buf3[2112];
 	int x;
 	file_readflashpage(fp, buf1, pageno);
+	if (check_ecc(buf1)==ECC_WRONG) {
+		printf("warning, invalid ECC on disk for page %d\n", pageno);
+	}
+
 	infectus_readflashpage(buf2, pageno);
+	if (check_ecc(buf2)==ECC_WRONG) {
+		printf("warning, invalid ECC in flash for page %d\n", pageno);
+	}
 
 	if((x = memcmp(buf1, buf2, sizeof buf1))) {
 //		printf("miscompare on page %d: \n", pageno);
@@ -434,8 +442,11 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 	usec = timer_end();
 	float rate = (float)blocks_done / (time(NULL) - start_time);
 	int secs_remaining = (4096 - blockno) / rate;
-	if (blocks_done > 2) printf (" %04.1f (%d:%02d) ", p * 100.0 / (4096 * 0x40), secs_remaining / 60, secs_remaining % 60);
-	printf ("Read(%.3f)\n", usec / 1000000.0f);
+	if (blocks_done > 2) printf (" %04.1f%%, %d:%02d remaining ", 
+		p * 100.0 / (4096 * 0x40), 
+		secs_remaining / 60, secs_remaining % 60);
+	if (debug_mode) printf ("Read(%.3f)", usec / 1000000.0f);
+	putchar('\r');
 	if (miscompares > 0) {
 //		printf("   %d miscompares in block\n", miscompares);
 		printf("Erasing...");
@@ -459,7 +470,8 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 			}
 		}
 		usec = timer_end();
-		printf ("Write(%.3f)\n", usec / 1000000.0f);
+		if (debug_mode) printf ("Write(%.3f)", usec / 1000000.0f);
+		putchar('\r');
 
 	}
 	blocks_done++;
@@ -468,7 +480,6 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 
 int flash_dump_block(FILE *fp, unsigned int blockno) {
 	u8 buf[2112];
-	unsigned long long usec;
 	int pageno, p, ret;
 	printf("%04x: ", blockno); fflush(stdout);
 
@@ -476,6 +487,9 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 		p = blockno*0x40 + pageno;
 		ret = infectus_readflashpage(buf, p);
 		if (ret==2112) {
+			if (check_ecc(buf)==ECC_WRONG) {
+				printf("warning, invalid ECC for page %d\n", pageno);
+			}
 			file_writeflashpage(fp, buf, p);
 			putchar('.');
 			fflush(stdout);
@@ -496,13 +510,12 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 }
 
 void usage(void) {
-	fprintf(stderr, "Usage: %s command -[tvwd] [-b blocksize] [-f filename]\n", progname);
+	fprintf(stderr, "Usage: %s command -[tvwd] [-b blocksize] filename\n", progname);
 	fprintf(stderr, "          -t            test mode -- do not erase or write\n");
 	fprintf(stderr, "          -v            verify every byte of written data\n");
 	fprintf(stderr, "          -w            wait for status after programming\n");
 	fprintf(stderr, "          -d            debug (enable debugging output)\n");
 	fprintf(stderr, "          -b blocksize  set blocksize; see docs for more info.  Default: 0x%x\n", block_size);
-	fprintf(stderr, "          -f filename   file to use for reading or writing data\n");
 	fprintf(stderr, "          -s blockno    start block -- skip this number of blocks before proceeding\n");
 	fprintf(stderr, "\nValid commands are:\n");
 	fprintf(stderr, "\n         check        check ECC data in file\n");
@@ -531,7 +544,8 @@ int check_file_ecc(char *filename) {
 	off_t file_length = ftello(fp);
 	fseek(fp, 0, SEEK_SET);
 	u64 num_pages = file_length / 2112;
-	printf("File size: %llu bytes / %llu pages / %llu blocks\n", file_length, num_pages, num_pages / 64);
+	printf("File size: %llu bytes / %llu pages / %llu blocks\n", 
+		file_length, num_pages, num_pages / 64);
 	for (pageno = 0; pageno < num_pages && !feof(fp); pageno++) {
 		u8 buf[4096];
 		file_readflashpage(fp, buf, pageno);
@@ -559,7 +573,7 @@ int check_file_ecc(char *filename) {
 		}
 	}
 	fclose(fp);
-	printf("Totals: %u pages OK, %u pages WRONG, %u pages blank, %u pages unreadable\n",
+	printf("\nTotals: %u pages OK, %u pages WRONG, %u pages blank, %u pages unreadable\n",
 		count_ok, count_wrong, count_blank, count_invalid);
 	exit(0);
 	return 1;
@@ -569,14 +583,33 @@ void usb_exit_handler(void) {
 	usb_close(h);
 }
 
+int check_file_validity(FILE *fp) {
+	off_t original_offset;
+	off_t file_size;
+	u8 header_magic[4];
+	
+	original_offset = ftello(fp);
+	fseeko(fp, 0, SEEK_END);
+	file_size = ftello(fp);
+	
+	if (file_size % 2112) {
+		printf("WARNING:  This file does not seem to be a valid dump file,\n");
+		printf("          because its filesize (%llu) is not a multiple of 2112\n", file_size);
+	}
+	
+	fseeko(fp, 0, SEEK_SET);
+	fread(header_magic, 1, 4, fp);
+	
+	if (memcmp(header_magic, "\x27\xAE\x8C\x9C", 4)) {
+		printf("WARNING: This file does not seem to be a Wii firmware dump.\n");
+	}
+	fseeko(fp, original_offset, SEEK_SET);
+	return 0;
+}
 
 int main (int argc,char **argv)
 {
-	int send_status, retval, argno;
-	u8 buf[4096];
-	int ret;
-	unsigned char send_buffer[8];
-	unsigned char recv_buffer[1024];
+	int retval;
 	char ch;
 	char *filename = NULL;
 	
@@ -623,7 +656,7 @@ int main (int argc,char **argv)
 		exit(1);
 	}
 
-	unsigned int flashid = 0;
+	u32 flashid = 0;
 	infectus_reset();
 	infectus_get_version();
 	infectus_get_loader_version();
@@ -667,6 +700,7 @@ int main (int argc,char **argv)
 			perror("Couldn't open file: ");
 			exit(1);
 		}
+		check_file_validity(fp);
 		fseek(fp, 0, SEEK_END);
 		off_t file_length = ftello(fp);
 		fseek(fp, 0, SEEK_SET);
@@ -680,8 +714,8 @@ int main (int argc,char **argv)
 	}
 
 	if(!strcmp(command, "dump")) {
-		unsigned long long begin, length;
-		unsigned int blockno;
+		u64 length;
+		u32 blockno;
 
 		blockno = start_block;
 		length = 553648128ULL - blockno * 0x40ULL * 2112ULL;
