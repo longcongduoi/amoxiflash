@@ -17,7 +17,7 @@ All responses seem to begin with the byte 0xFF -- this is probably a return valu
                                 Even if only a single NAND chip is present, this command must be sent to initialize the chip.
 }}}
 
-= PLD Info queries =
+= PLD Info queries - 0x4c  =
 0x4C commands retrieve info about the programing of the chip.
 
 {{{
@@ -25,15 +25,15 @@ All responses seem to begin with the byte 0xFF -- this is probably a return valu
  4c 15 00 00 00 00 00 00     -- get "PLD ID" -- this identifies which "Actel program" has been loaded onto the device
 }}}
 
-= NAND commands ==
+= NAND commands - 0x4e 0x00 ==
 The Infectus software sends raw NAND commands to the chip.  This is a good thing, because it means we should be able to add support for any NAND flash chip that we can obtain a datasheet for.
-
-0x4e:  Send command to NAND chip
 
 Note: the below commands are just meant as examples.  They are correct for the 512MB large-block Wii flash chips I've tried, but will vary between chips; consult your local datasheet for more info.
 
 {{{
- 4e 00 00 00 00 00 00 xx yy zz ...    xx is the number of parameters, yy is the command ID, zz ... are parameters
+4e 00 00 00 00 00 00 xx yy zz ... xx is the number of parameters
+                                  yy is the command ID
+                                  zz ... are parameters
 
 4e 00 00 00 00 00 00 00 FF    -- reset flash
 
@@ -62,11 +62,9 @@ Note: the below commands are just meant as examples.  They are correct for the 5
  
 }}}
 
-= Data Transfers =
+= Data Transfers - 0x4e 0x02 / 0x4e 0x01 =
 The Infectus chip seems to have a small buffer which is used to support bulk data transfers between the chip and the NAND flash part, to be used when reading or programming.  The buffer is somewhere between 700-1056 bytes long.
 
 Reading from the buffer: `4e 02 00 00 00 00 {x1 x0}`   -- reads {x1 x0} bytes from the Infectus buffer.  In the official Infectus software, this is always {02 10}, or 526 bytes.  Therefore, to read a 2112 -byte flash page (2048 + 64), you must call this command 4 times.   It also is possible to  use {02 c0} (704 bytes), which will allow all 2112 bytes to be read in 3 chunks.
 
 Writing to the buffer: `4e 01 00 00 00 00 {x1 x0}` -- writes {x1 x0} bytes to the Infectus buffer.  The same rules for block size apply as with reading.
-
-(To Be Continued...)  
