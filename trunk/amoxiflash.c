@@ -250,8 +250,9 @@ int infectus_check_pld_id(void) {
 	} else {
 		printf("PLD ID: %s\n", pld_ids[buf[1]]);
 	}
-	if (buf[1] != 7) {
-		fprintf(stderr, "WARNING: This program has only been tested with the \"XDowngrader\" PLD firmware.  Good luck.\n");
+	if (buf[1] != 7 && buf[1] != 4) {
+		fprintf(stderr, "WARNING: If you experience problems, please try reprogramming the Infectus\n");
+		fprintf(stderr, "chip with the 'NAND Programmer' or 'XDowngrader' firmwares and try again.\n");
 	}
 	return 0;
 }
