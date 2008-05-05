@@ -3,8 +3,8 @@ LDFLAGS	= -g -lusb -lm
 
 all: amoxiflash
 
-amoxiflash: amoxiflash.c
-	gcc $(CFLAGS) -o amoxiflash amoxiflash.c $(LDFLAGS)
+amoxiflash: amoxiflash.c ecc.c
+	gcc $(CFLAGS) -o amoxiflash amoxiflash.c ecc.c $(LDFLAGS)
 
 clean:
 	rm amoxiflash amoxiflash.o

@@ -24,6 +24,7 @@ For more information, contact bushing@gmail.com, or see http://code.google.com/p
 #include <string.h>
 #include <stdarg.h>
 #include <sys/time.h>
+#include "amoxiflash.h"
 
 #define INFECTUS_NAND_CMD 0x4e
 #define INFECTUS_NAND_SEND 0x1
@@ -39,25 +40,11 @@ For more information, contact bushing@gmail.com, or see http://code.google.com/p
 #define NAND_WRITE_PRE 0x80
 #define NAND_WRITE_POST 0x10
 
-typedef unsigned char u8;
-typedef unsigned int u32;
-typedef unsigned long long int u64;
-
 usb_dev_handle *locate_infectus(void);
-
-char *pld_ids[] = {
-	  "O2MOD",
-      "Globe Hitachi",
-      "Globe Samsung",
-      "Infectus 78",
-      "NAND Programmer",
-      "2 NAND Programmer",
-      "SPI Programmer",
-      "XDowngrader"
-};
 
 struct usb_dev_handle *h;
 struct timeval tv1, tv2;
+char *progname;
 
 int run_fast = 0;
 int block_size = 0x2c0;
@@ -70,6 +57,27 @@ int quick_check = 0;
 
 u32 start_time = 0;
 u32 blocks_done = 0;
+
+char *spinner_chars="/-\\|";
+int spin = 0;
+
+void draw_spin(void) {
+	printf("\b%c", spinner_chars[spin++]);
+	fflush(stdout);
+    if(!spinner_chars[spin]) spin=0;    
+}
+
+static const char *pld_ids[] = {
+	  "O2MOD",
+      "Globe Hitachi",
+      "Globe Samsung",
+      "Infectus 78",
+      "NAND Programmer",
+      "2 NAND Programmer",
+      "SPI Programmer",
+      "XDowngrader"
+};
+
 
 void timer_start(void) {
 	gettimeofday(&tv1, NULL);
@@ -170,7 +178,7 @@ int infectus_nand_receive(u8 *buf, int len) {
 	return infectus_sendcommand(buf, 8, len+3);
 }
 
-int infectus_reset() {
+int infectus_reset(void) {
 	u8 buf[128];
 	int ret;
 	
@@ -487,15 +495,7 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 	return 0;
 }
 
-int check_file_ecc(char *filename) {
-	return 1;
-}
-
-void usb_exit_handler(void) {
-	usb_close(h);
-}
-
-void usage(char *progname) {
+void usage(void) {
 	fprintf(stderr, "Usage: %s command -[tvwd] [-b blocksize] [-f filename]\n", progname);
 	fprintf(stderr, "          -t            test mode -- do not erase or write\n");
 	fprintf(stderr, "          -v            verify every byte of written data\n");
@@ -511,6 +511,65 @@ void usage(char *progname) {
 	exit(1);	
 }
 
+
+int check_file_ecc(char *filename) {
+	u32 pageno;
+	u32 count_invalid=0, count_wrong=0, count_blank=0, count_ok=0;
+	
+	if (!filename) {
+		fprintf(stderr, "Error: you must specify a filename to check\n");
+		usage();
+	}
+	printf("Checking ECC for file %s\n", filename);
+	start_time = time(NULL);
+	FILE *fp = fopen(filename, "rb");
+	if(!fp) {
+		perror("Couldn't open file: ");
+		exit(1);
+	}
+	fseek(fp, 0, SEEK_END);
+	off_t file_length = ftello(fp);
+	fseek(fp, 0, SEEK_SET);
+	u64 num_pages = file_length / 2112;
+	printf("File size: %llu bytes / %llu pages / %llu blocks\n", file_length, num_pages, num_pages / 64);
+	for (pageno = 0; pageno < num_pages && !feof(fp); pageno++) {
+		u8 buf[4096];
+		file_readflashpage(fp, buf, pageno);
+		if ((pageno % 4096)==0) {
+			printf ("\r%04.1f%%  ", pageno * 100.0 / num_pages);
+			draw_spin();
+		}
+		switch (check_ecc(buf)) {
+			case ECC_OK: 
+				count_ok++;
+			break;
+			case ECC_WRONG:
+				count_wrong++;
+			 	printf("%d: ecc WRONG\n", pageno);
+				printf("Stored ECC: "); hexdump(buf+2048+48, 16);
+				printf("Calc   ECC: "); hexdump(calc_page_ecc(buf), 16);
+				break;
+			case ECC_INVALID: 
+				count_invalid++;
+			break;
+			case ECC_BLANK: 
+				count_blank++;
+			break;
+			default: break;
+		}
+	}
+	fclose(fp);
+	printf("Totals: %u pages OK, %u pages WRONG, %u pages blank, %u pages unreadable\n",
+		count_ok, count_wrong, count_blank, count_invalid);
+	exit(0);
+	return 1;
+}
+
+void usb_exit_handler(void) {
+	usb_close(h);
+}
+
+
 int main (int argc,char **argv)
 {
 	int send_status, retval, argno;
@@ -519,9 +578,12 @@ int main (int argc,char **argv)
 	unsigned char send_buffer[8];
 	unsigned char recv_buffer[1024];
 	char ch;
-	char *filename = NULL, *progname = argv[0];
-	if (argc < 2) usage(argv[0]);
+	char *filename = NULL;
+	
+	progname = argv[0];
+	if (argc < 2) usage();
 	char *command = argv[1];
+	if (argc > 2) filename = argv[2];
 	optind = 2; // skip cover command
 	
 	while ((ch = getopt(argc, argv, "b:tvwdf:s:q")) != -1) {
@@ -536,7 +598,7 @@ int main (int argc,char **argv)
 			case 'q': quick_check = 1; break;
             case '?':
             default:
-                usage(progname);
+                usage();
          }
 	}
 	argc -= optind;
@@ -545,7 +607,7 @@ int main (int argc,char **argv)
 	if (!strcmp(command, "check")) {
 		if (!filename) {
 			fprintf(stderr, "Error: check requires a filename\n");
-			usage(progname);
+			usage();
 		}
 
 		retval = check_file_ecc(filename);
@@ -558,17 +620,14 @@ int main (int argc,char **argv)
  	if ((h = locate_infectus())==0) 
 	{
 		printf("Could not open the infectus device\n");
-		return (-1);
+		exit(1);
 	}
 
 	unsigned int flashid = 0;
 	infectus_reset();
 	infectus_get_version();
-	usleep(1000);
 	infectus_get_loader_version();
-	usleep(1000);
 	infectus_check_pld_id();
-	usleep(1000);
 	infectus_selectflash(0);
 	usleep(1000);
 	flashid = infectus_getflashid();
@@ -600,7 +659,7 @@ int main (int argc,char **argv)
 
 		if (!filename) {
 			fprintf(stderr, "Error: you must specify a filename to program\n");
-			usage(progname);
+			usage();
 		}
 		printf("Programming file %s into flash\n", filename);
 		FILE *fp = fopen(filename, "rb");
@@ -676,7 +735,7 @@ int main (int argc,char **argv)
 		}	
 #endif
 	printf("Unknown command '%s'\n", command);
-	usage(progname);
+	usage();
 	exit(1);  // not reached
 }	
 
