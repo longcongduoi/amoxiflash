@@ -65,6 +65,6 @@ Note: the below commands are just meant as examples.  They are correct for the 5
 = Data Transfers - 0x4e 0x02 / 0x4e 0x01 =
 The Infectus chip seems to have a small buffer which is used to support bulk data transfers between the chip and the NAND flash part, to be used when reading or programming.  The buffer is somewhere between 700-1056 bytes long.
 
-Reading from the buffer: `4e 02 00 00 00 00 {x1 x0}`   -- reads {x1 x0} bytes from the Infectus buffer.  In the official Infectus software, this is always {02 10}, or 526 bytes.  Therefore, to read a 2112 -byte flash page (2048 + 64), you must call this command 4 times.   It also is possible to  use {02 c0} (704 bytes), which will allow all 2112 bytes to be read in 3 chunks.
+Reading from the buffer: `4e 02 00 00 00 00 {x1 x0}`   -- reads {x1 x0} bytes from the Infectus buffer.  In the official Infectus software, this is always {02 10}, or 528 bytes.  Therefore, to read a 2112 -byte flash page (2048 + 64), you must call this command 4 times.   It also is possible to  use {02 c0} (704 bytes), which will allow all 2112 bytes to be read in 3 chunks.
 
 Writing to the buffer: `4e 01 00 00 00 00 {x1 x0}` -- writes {x1 x0} bytes to the Infectus buffer.  The same rules for block size apply as with reading.
