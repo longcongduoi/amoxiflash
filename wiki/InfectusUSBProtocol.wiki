@@ -10,20 +10,33 @@ All responses seem to begin with the byte 0xFF -- this is probably a return valu
 = Initialization  - 0x45 =
 0x45 commands seem to be handled by the SiLabs MCU onboard the Infectus chip.
 
+{{{
  45 15 00 00 00 00 00 00     -- reset chip
  45 13 01 00 00 00 00 00     -- get chip revision?  returns 0x82 for me
- 45 14 xx 00 00 00 00 00     -- select NAND bank -- xx should be either 00 or 01, depending on which chip in a dual-chip configuration should be used.   Even if only a single NAND chip is present, this command must be sent to initialize the chip.
+ 45 14 xx 00 00 00 00 00     -- select NAND bank -- xx should be either 00 or 01, depending on which chip in a dual-chip configuration should be used.   
+                                Even if only a single NAND chip is present, this command must be sent to initialize the chip.
+}}}
 
 = PLD Info queries =
 0x4C commands retrieve info about the programing of the chip.
 
+{{{
  4c 07 00 00 00 00 00 00     -- get "loader version" number
  4c 15 00 00 00 00 00 00     -- get "PLD ID" -- this identifies which "Actel program" has been loaded onto the device
+}}}
 
 = NAND commands ==
 The Infectus software sends raw NAND commands to the chip.  This is a good thing, because it means we should be able to add support for any NAND flash chip that we can obtain a datasheet for.
 
 0x4e:  Send command to NAND chip
-  4e 00 00 00 00 00 00 xx yy zz ...     -- xx is length of command, yy zz ... is actual commands
+{{{
+  4e 00 00 00 00 00 00 xx yy zz ...     -- xx is the number of parameters, yy is the command ID, zz ... are parameters
+  4e 00 00 00 00 00 00 00 FF            -- reset flash
+  4e 00 00 00 00 00 00 01 90 00         -- read flash ID
+  4e 00 00 00 00 00 00 00 70            -- read flash status
+  4e 00 00 00 00 00 00 03 60 b0 b1 b2   -- erase PRE -- {b2,b1,b0} is 24-bit block number
+  4e 00 00 00 00 00 00 00 d0            -- erase confirm
 
+ 
+}}}
 (To Be Continued...)  
