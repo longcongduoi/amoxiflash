@@ -28,5 +28,6 @@ typedef unsigned int u32;
 
 typedef unsigned long long int u64;
 
+u8 * calc_page_ecc(u8 *data);
 int check_ecc(u8 *page);
 
