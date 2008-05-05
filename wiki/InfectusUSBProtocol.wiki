@@ -29,13 +29,18 @@ All responses seem to begin with the byte 0xFF -- this is probably a return valu
 The Infectus software sends raw NAND commands to the chip.  This is a good thing, because it means we should be able to add support for any NAND flash chip that we can obtain a datasheet for.
 
 0x4e:  Send command to NAND chip
+
+Note: the below commands are for large-block NAND flash chips only; they are slightly different for small-block chips.
+
 {{{
-  4e 00 00 00 00 00 00 xx yy zz ...     -- xx is the number of parameters, yy is the command ID, zz ... are parameters
-  4e 00 00 00 00 00 00 00 FF            -- reset flash
-  4e 00 00 00 00 00 00 01 90 00         -- read flash ID
-  4e 00 00 00 00 00 00 00 70            -- read flash status
-  4e 00 00 00 00 00 00 03 60 b0 b1 b2   -- erase PRE -- {b2,b1,b0} is 24-bit block number
-  4e 00 00 00 00 00 00 00 d0            -- erase confirm
+  4e 00 00 00 00 00 00 xx yy zz ...            -- xx is the number of parameters, yy is the command ID, zz ... are parameters
+  4e 00 00 00 00 00 00 00 FF                   -- reset flash
+  4e 00 00 00 00 00 00 01 90 00                -- read flash ID
+  4e 00 00 00 00 00 00 00 70                   -- read flash status
+  4e 00 00 00 00 00 00 03 60 b0 b1 b2          -- erase PRE -- {b2,b1,b0} is 24-bit block number
+  4e 00 00 00 00 00 00 00 d0                   -- erase confirm
+  4e 00 00 00 00 00 00 05 00 o0 o1 p0 p1 p2 p3 -- page read PRE -- {p3, p2, p1, p0} is 32-bit page number, {o1, o0} is offset within the block (usually 0)
+  4e 00 00 00 00 00 00 00 30                   -- page read confirm
 
  
 }}}
