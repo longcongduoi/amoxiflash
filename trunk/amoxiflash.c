@@ -58,8 +58,9 @@ struct timeval tv1, tv2;
 char *progname;
 
 int run_fast = 0;
-int block_size = 0x2c0;
+int subpage_size = 0x2c0;
 int verify_after_write = 1;
+int force = 0;
 int debug_mode = 0;
 int test_mode = 0;
 int check_status = 0;
@@ -237,7 +238,7 @@ int infectus_get_version(void) {
 	return 0;
 }
 
-/* Version part 2: ? */
+/* Version part 2: loader version */
 int infectus_get_loader_version(void) {
 	u8 buf[128];
 	int ret;
@@ -352,10 +353,10 @@ int infectus_readflashpage(u8 *dstbuf, unsigned int pageno) {
 	ret = infectus_sendcommand(buf, len, 128);
 	
 	len = 0;
-	for(subpage = 0; subpage < ceil(2112.0 / block_size); subpage++) {
-		ret = infectus_nand_receive(flash_buf, block_size);
-		if (ret!= (block_size+1)) printf("Readpage returned %d\n", ret);
-		memcpy(dstbuf + subpage*block_size, flash_buf+1, block_size);
+	for(subpage = 0; subpage < ceil(2112.0 / subpage_size); subpage++) {
+		ret = infectus_nand_receive(flash_buf, subpage_size);
+		if (ret!= (subpage_size+1)) printf("Readpage returned %d\n", ret);
+		memcpy(dstbuf + subpage*subpage_size, flash_buf+1, subpage_size);
 		len += ret-1;
 	}
 	return len;
@@ -416,16 +417,16 @@ int infectus_writeflashpage(u8 *dstbuf, unsigned int pageno) {
 	
 	if (test_mode) return 0;
 	
-	for(subpage = 0; subpage < ceil(2112.0/block_size); subpage++) {
-			len=infectus_nand_command(buf, 5, NAND_WRITE_PRE, subpage * block_size,
-				(subpage * block_size) >> 8 , pageno, pageno >> 8, pageno >> 16);
+	for(subpage = 0; subpage < ceil(2112.0/subpage_size); subpage++) {
+			len=infectus_nand_command(buf, 5, NAND_WRITE_PRE, subpage * subpage_size,
+				(subpage * subpage_size) >> 8 , pageno, pageno >> 8, pageno >> 16);
 			ret = infectus_sendcommand(buf, len, 128);
 
 			// XXX cleanup
 			memcpy(flash_buf, "\x4e\x01\x00\x00\x00\x00\x02\xc0", 8);
-			memcpy(flash_buf+8, dstbuf + subpage * block_size, block_size);
+			memcpy(flash_buf+8, dstbuf + subpage * subpage_size, subpage_size);
 
-			infectus_sendcommand(flash_buf, block_size+8, 4096);
+			infectus_sendcommand(flash_buf, subpage_size+8, 4096);
 
   			len=infectus_nand_command(buf, 0, NAND_WRITE_POST);
 			ret = infectus_sendcommand(buf, len, 128);
@@ -439,9 +440,8 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 	u8 buf[2112];
 	unsigned long long usec;
 	int pageno, p, miscompares=0;
-//	printf("flash_program_block(0x%x)\n", blockno);
-//	printf("                                                      \r");
-	printf("\r%04x: ", blockno); fflush(stdout);
+	printf("\r                                                                     ");
+	printf("\r%04x", blockno); fflush(stdout);
 	timer_start();
 	for(pageno = run_fast?2:0; pageno < 0x40; pageno += (run_fast?0x4:1)) {
 		p = blockno*0x40 + pageno;
@@ -455,10 +455,15 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 	usec = timer_end();
 	float rate = (float)blocks_done / (time(NULL) - start_time);
 	int secs_remaining = (4096 - blockno) / rate;
-	if (blocks_done > 2) printf ("%04.1f%%, %d:%02d remaining ", 
-		p * 100.0 / (4096 * 0x40), 
-		secs_remaining / 60, secs_remaining % 60);
-	if (debug_mode) printf ("Read(%.3f)", usec / 1000000.0f);
+	if (blocks_done > 2) {
+		printf ("%04.1f%% ",p * 100.0 / (4096 * 0x40));
+		if (secs_remaining > 180) {
+			printf("%dm\r", secs_remaining/60);
+		} else {
+			printf("%ds\r", secs_remaining);
+		}
+	} else putchar('\r');
+	if (debug_mode) fprintf(stderr, "Read(%.3f)", usec / 1000000.0f);
 	putchar('\r');
 	if (miscompares > 0) {
 //		printf("   %d miscompares in block\n", miscompares);
@@ -483,7 +488,7 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 			}
 		}
 		usec = timer_end();
-		if (debug_mode) printf ("Write(%.3f)", usec / 1000000.0f);
+		if (debug_mode) fprintf(stderr,"Write(%.3f)", usec / 1000000.0f);
 		putchar('\r');
 
 	}
@@ -527,22 +532,69 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 }
 
 void usage(void) {
-	fprintf(stderr, "Usage: %s command -[tvwd] [-b blocksize] filename\n", progname);
+	fprintf(stderr, "Usage: %s command -[tvwdf] [-b blocksize] filename\n", progname);
 	fprintf(stderr, "          -t            test mode -- do not erase or write\n");
 	fprintf(stderr, "          -v            verify every byte of written data\n");
 	fprintf(stderr, "          -w            wait for status after programming\n");
+	fprintf(stderr, "          -f            force: ignore safety checks. Dangerous!\n");
 	fprintf(stderr, "          -d            debug (enable debugging output)\n");
-	fprintf(stderr, "          -b blocksize  set blocksize; see docs for more info.  Default: 0x%x\n", block_size);
+	fprintf(stderr, "          -b blocksize  set blocksize; see docs for more info.  Default: 0x%x\n", subpage_size);
 	fprintf(stderr, "          -s blockno    start block -- skip this number of blocks\n");
 	fprintf(stderr, "                        before proceeding\n");
 	fprintf(stderr, "\nValid commands are:\n");
-	fprintf(stderr, "\n         check        check ECC data in file\n");
-	fprintf(stderr, "\n         dump         read from flash chip and dump to file\n");
-	fprintf(stderr, "\n         program      compare file to flash contents, reprogram flash\n");
+	fprintf(stderr, "         check        check ECC data in file\n");
+	fprintf(stderr, "         strip        strip ECC data from file\n");
+	fprintf(stderr, "         dump         read from flash chip and dump to file\n");
+	fprintf(stderr, "         program      compare file to flash contents, reprogram flash\n");
 	fprintf(stderr, "                        to match file\n");
 	exit(1);	
 }
 
+int strip_file_ecc(char *filename) {
+	u32 pageno;
+	if (!filename) {
+		fprintf(stderr, "Error: you must specify a filename to strip\n");
+		usage();
+	}
+
+	char *output_filename=malloc(strlen(filename)+5);
+	sprintf(output_filename, "%s.raw", filename);
+	
+	FILE *fp = fopen(filename, "rb");
+	if(!fp) {
+		perror("Couldn't open input file: ");
+		exit(1);
+	}
+	fseek(fp, 0, SEEK_END);
+	off_t file_length = ftello(fp);
+	fseek(fp, 0, SEEK_SET);
+	
+	if ((file_length % 2112) && !force) {
+		printf("Error: File length is not a multiple of 2112 bytes.  Are you sure\n");
+		printf("you want to do this?  Pass -f to force.\n");
+		exit(1);
+	}
+
+	printf("Stripping ECC data from %s into %s\n", filename, output_filename);
+	FILE *fp_out = fopen(output_filename, "wb");
+	if(!fp_out) {
+		perror("Couldn't open output file: ");
+		exit(1);
+	}
+	
+	u64 num_pages = file_length / 2112;
+	printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
+		file_length, num_pages, num_pages / 64);
+	
+	for (pageno=0; (pageno < num_pages) && !feof(fp); pageno++) {
+		u8 buf[2112];
+		fread(buf, 1, 2112, fp);
+		fwrite(buf, 1, 2048, fp_out);
+	}
+	fclose(fp_out);
+	fclose(fp);
+	return 0;
+}
 
 int check_file_ecc(char *filename) {
 	u32 pageno;
@@ -640,12 +692,12 @@ int main (int argc,char **argv)
 	
 	while ((ch = getopt(argc, argv, "b:tvwdf:s:q")) != -1) {
 		switch (ch) {
-			case 'b': block_size = strtol(optarg, NULL, 0); break;
+			case 'b': subpage_size = strtol(optarg, NULL, 0); break;
 			case 't': test_mode = 1; break;
 			case 'v': verify_after_write = 1; break;
 			case 'w': check_status = 1; break;
 			case 'd': debug_mode = 1; break;
-			case 'f': filename = optarg; break;
+			case 'f': force = 1; break;
 			case 's': start_block = strtol(optarg, NULL, 0); break;
 			case 'q': quick_check = 1; break;
             case '?':
@@ -665,7 +717,17 @@ int main (int argc,char **argv)
 		retval = check_file_ecc(filename);
 		exit(retval);
 	}
-		
+
+	if (!strcmp(command, "strip")) {
+		if (!filename) {
+			fprintf(stderr, "Error: strip requires a filename\n");
+			usage();
+		}
+
+		retval = strip_file_ecc(filename);
+		exit(retval);
+	}
+	
 	usb_init();
 	atexit(usb_exit_handler);
 //	usb_set_debug(2);
