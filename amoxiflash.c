@@ -23,8 +23,15 @@ For more information, contact bushing@gmail.com, or see http://code.google.com/p
 #include <usb.h>
 #include <string.h>
 #include <stdarg.h>
+#include <unistd.h>
 #include <sys/time.h>
 #include "amoxiflash.h"
+
+#ifdef __MINGW32__
+#define fseeko fseeko64
+#define ftello ftello64
+#define usleep(x) _sleep((x)/1000)
+#endif
 
 #define INFECTUS_NAND_CMD 0x4e
 #define INFECTUS_NAND_SEND 0x1
@@ -517,11 +524,13 @@ void usage(void) {
 	fprintf(stderr, "          -w            wait for status after programming\n");
 	fprintf(stderr, "          -d            debug (enable debugging output)\n");
 	fprintf(stderr, "          -b blocksize  set blocksize; see docs for more info.  Default: 0x%x\n", block_size);
-	fprintf(stderr, "          -s blockno    start block -- skip this number of blocks before proceeding\n");
+	fprintf(stderr, "          -s blockno    start block -- skip this number of blocks\n");
+	fprintf(stderr, "                        before proceeding\n");
 	fprintf(stderr, "\nValid commands are:\n");
 	fprintf(stderr, "\n         check        check ECC data in file\n");
 	fprintf(stderr, "\n         dump         read from flash chip and dump to file\n");
-	fprintf(stderr, "\n         program      compare file to flash contents, reprogram flash to match file\n");
+	fprintf(stderr, "\n         program      compare file to flash contents, reprogram flash\n");
+	fprintf(stderr, "                        to match file\n");
 	exit(1);	
 }
 
