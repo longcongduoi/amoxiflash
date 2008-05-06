@@ -18,6 +18,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 For more information, contact bushing@gmail.com, or see http://code.google.com/p/amoxiflash
 */
 
+#define VERSION "0.2"
+
 #include <stdio.h>
 #include <math.h>
 #include <inttypes.h>
@@ -59,6 +61,8 @@ char *progname;
 
 int run_fast = 0;
 int subpage_size = 0x2c0;
+int page_size = 2048;
+int spare_size = 64;
 int verify_after_write = 1;
 int force = 0;
 int debug_mode = 0;
@@ -188,6 +192,22 @@ int infectus_nand_receive(u8 *buf, int len) {
 	buf[6] = (len >> 8) & 0xff;
 	buf[7] = len & 0xff;
 	return infectus_sendcommand(buf, 8, len+3);
+}
+
+int infectus_nand_send(u8 *buf, int len) {
+	u8 temp_buf[4096];
+	memset(temp_buf, 0, sizeof temp_buf);
+
+	memcpy(temp_buf, "\x4e\x01\x00\x00\x00\x00", 8);
+	temp_buf[6] = len/256;
+	temp_buf[7] = len%256;
+	memcpy(temp_buf+8, buf, len);
+	
+	int retval = infectus_sendcommand(temp_buf, len+8, 4096);
+	if (retval < 0) return retval;
+	if (retval > len) retval = len - 1;
+	memcpy(buf, temp_buf, retval);
+	return retval;
 }
 
 int infectus_reset(void) {
@@ -353,7 +373,7 @@ int infectus_readflashpage(u8 *dstbuf, unsigned int pageno) {
 	ret = infectus_sendcommand(buf, len, 128);
 	
 	len = 0;
-	for(subpage = 0; subpage < ceil(2112.0 / subpage_size); subpage++) {
+	for(subpage = 0; subpage < ceil((float)(page_size + spare_size) / subpage_size); subpage++) {
 		ret = infectus_nand_receive(flash_buf, subpage_size);
 		if (ret!= (subpage_size+1)) printf("Readpage returned %d\n", ret);
 		memcpy(dstbuf + subpage*subpage_size, flash_buf+1, subpage_size);
@@ -363,13 +383,13 @@ int infectus_readflashpage(u8 *dstbuf, unsigned int pageno) {
 }
 
 int file_readflashpage(FILE *fp, u8 *dstbuf, unsigned int pageno) {
-	fseeko(fp, pageno * 2112, SEEK_SET);
-	return fread(dstbuf, 1, 2112, fp);
+	fseeko(fp, pageno * (page_size + spare_size), SEEK_SET);
+	return fread(dstbuf, 1, page_size + spare_size, fp);
 }
 
 int file_writeflashpage(FILE *fp, u8 *dstbuf, unsigned int pageno) {
-	fseeko(fp, pageno * 2112, SEEK_SET);
-	return fwrite(dstbuf, 1, 2112, fp);
+	fseeko(fp, pageno * (page_size + spare_size), SEEK_SET);
+	return fwrite(dstbuf, 1, (page_size + spare_size), fp);
 }
 
 int mem_compare(u8 *buf1, u8 *buf2, int size) {
@@ -379,8 +399,8 @@ int mem_compare(u8 *buf1, u8 *buf2, int size) {
 }
 
 int flash_compare(FILE *fp, unsigned int pageno) {
-	u8 buf1[2112], buf2[2112];
-//	u8 buf3[2112];
+	u8 buf1[4096], buf2[4096];
+//	u8 buf3[4096];
 	int x;
 	file_readflashpage(fp, buf1, pageno);
 	if (check_ecc(buf1)==ECC_WRONG) {
@@ -392,7 +412,7 @@ int flash_compare(FILE *fp, unsigned int pageno) {
 		printf("warning, invalid ECC in flash for page %d\n", pageno);
 	}
 
-	if((x = memcmp(buf1, buf2, sizeof buf1))) {
+	if((x = memcmp(buf1, buf2, page_size + spare_size))) {
 //		printf("miscompare on page %d: \n", pageno);
 //		infectus_readflashpage(buf3, pageno);
 //		if(memcmp(buf2, buf3, sizeof buf3)) {
@@ -412,21 +432,16 @@ int flash_isFF(u8 *buf, int len) {
 
 int infectus_writeflashpage(u8 *dstbuf, unsigned int pageno) {
 	u8 buf[128];
-	u8 flash_buf[4096];
 	int ret, len, subpage;
 	
 	if (test_mode) return 0;
 	
-	for(subpage = 0; subpage < ceil(2112.0/subpage_size); subpage++) {
+	for(subpage = 0; subpage < ceil((float)(page_size + spare_size)/subpage_size); subpage++) {
 			len=infectus_nand_command(buf, 5, NAND_WRITE_PRE, subpage * subpage_size,
 				(subpage * subpage_size) >> 8 , pageno, pageno >> 8, pageno >> 16);
 			ret = infectus_sendcommand(buf, len, 128);
 
-			// XXX cleanup
-			memcpy(flash_buf, "\x4e\x01\x00\x00\x00\x00\x02\xc0", 8);
-			memcpy(flash_buf+8, dstbuf + subpage * subpage_size, subpage_size);
-
-			infectus_sendcommand(flash_buf, subpage_size+8, 4096);
+			infectus_nand_send(dstbuf + subpage * subpage_size, subpage_size);
 
   			len=infectus_nand_command(buf, 0, NAND_WRITE_POST);
 			ret = infectus_sendcommand(buf, len, 128);
@@ -437,7 +452,7 @@ int infectus_writeflashpage(u8 *dstbuf, unsigned int pageno) {
 }
 
 int flash_program_block(FILE *fp, unsigned int blockno) {
-	u8 buf[2112];
+	u8 buf[4096];
 	unsigned long long usec;
 	int pageno, p, miscompares=0;
 	printf("\r                                                                     ");
@@ -473,8 +488,8 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 		timer_start();
 		for(pageno = 0; pageno < 0x40; pageno++) {
 			p = blockno*0x40 + pageno;
-			if (file_readflashpage(fp, buf, p)==2112) {
-				if(flash_isFF(buf,2112)) {
+			if (file_readflashpage(fp, buf, p)==(page_size + spare_size)) {
+				if(flash_isFF(buf, (page_size + spare_size))) {
 					putchar('F');
 					continue;
 				}
@@ -497,7 +512,7 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 }
 
 int flash_dump_block(FILE *fp, unsigned int blockno) {
-	u8 buf[2112];
+	u8 buf[4096];
 	int pageno, p, ret;
 	printf("\r                                                                     ");
 	printf("\r%04x", blockno); fflush(stdout);
@@ -505,7 +520,7 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 	for(pageno = 0; pageno < 0x40; pageno++) {
 		p = blockno*0x40 + pageno;
 		ret = infectus_readflashpage(buf, p);
-		if (ret==2112) {
+		if (ret==(page_size + spare_size)) {
 			if (check_ecc(buf)==ECC_WRONG) {
 				printf("warning, invalid ECC for page %d\n", pageno);
 			}
@@ -513,7 +528,7 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 			putchar('.');
 			fflush(stdout);
 		} else {
-			printf("error, short read: %d < %d\n", ret, 2112);
+			printf("error, short read: %d < %d\n", ret, page_size + spare_size);
 		}
 	}
 	float rate = (float)blocks_done / (time(NULL) - start_time);
@@ -569,8 +584,9 @@ int strip_file_ecc(char *filename) {
 	off_t file_length = ftello(fp);
 	fseek(fp, 0, SEEK_SET);
 	
-	if ((file_length % 2112) && !force) {
-		printf("Error: File length is not a multiple of 2112 bytes.  Are you sure\n");
+	if ((file_length % (page_size + spare_size)) && !force) {
+		printf("Error: File length is not a multiple of %d bytes.  Are you sure\n",
+			page_size + spare_size);
 		printf("you want to do this?  Pass -f to force.\n");
 		exit(1);
 	}
@@ -582,14 +598,18 @@ int strip_file_ecc(char *filename) {
 		exit(1);
 	}
 	
-	u64 num_pages = file_length / 2112;
+	u64 num_pages = file_length / (page_size + spare_size);
 	printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
 		file_length, num_pages, num_pages / 64);
 	
 	for (pageno=0; (pageno < num_pages) && !feof(fp); pageno++) {
-		u8 buf[2112];
-		fread(buf, 1, 2112, fp);
-		fwrite(buf, 1, 2048, fp_out);
+		u8 buf[4096];
+		if ((pageno % 2048)==0) {
+			printf ("\r%04.1f%%  ", pageno * 100.0 / num_pages);
+			draw_spin();
+		}
+		fread(buf, 1, page_size + spare_size, fp);
+		fwrite(buf, 1, page_size, fp_out);
 	}
 	fclose(fp_out);
 	fclose(fp);
@@ -614,13 +634,13 @@ int check_file_ecc(char *filename) {
 	fseek(fp, 0, SEEK_END);
 	off_t file_length = ftello(fp);
 	fseek(fp, 0, SEEK_SET);
-	u64 num_pages = file_length / 2112;
+	u64 num_pages = file_length / (page_size + spare_size);
 	printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
 		file_length, num_pages, num_pages / 64);
 	for (pageno = 0; pageno < num_pages && !feof(fp); pageno++) {
 		u8 buf[4096];
 		file_readflashpage(fp, buf, pageno);
-		if ((pageno % 4096)==0) {
+		if ((pageno % 2048)==0) {
 			printf ("\r%04.1f%%  ", pageno * 100.0 / num_pages);
 			draw_spin();
 		}
@@ -631,7 +651,7 @@ int check_file_ecc(char *filename) {
 			case ECC_WRONG:
 				count_wrong++;
 			 	printf("%d: ecc WRONG\n", pageno);
-				printf("Stored ECC: "); hexdump(buf+2048+48, 16);
+				printf("Stored ECC: "); hexdump(buf+page_size+48, 16);
 				printf("Calc   ECC: "); hexdump(calc_page_ecc(buf), 16);
 				break;
 			case ECC_INVALID: 
@@ -663,9 +683,10 @@ int check_file_validity(FILE *fp) {
 	fseeko(fp, 0, SEEK_END);
 	file_size = ftello(fp);
 	
-	if (file_size % 2112) {
+	if (file_size % (page_size + spare_size)) {
 		printf("WARNING:  This file does not seem to be a valid dump file,\n");
-		printf("          because its filesize (%"PRIu64") is not a multiple of 2112\n", file_size);
+		printf("          because its filesize (%"PRIu64") is not a multiple of %d\n", 
+			file_size, page_size + spare_size);
 	}
 	
 	fseeko(fp, 0, SEEK_SET);
@@ -685,6 +706,8 @@ int main (int argc,char **argv)
 	char *filename = NULL;
 	
 	progname = argv[0];
+	printf("amoxiflash version %s, (c) 2008 bushing\n", VERSION);
+	
 	if (argc < 2) usage();
 	char *command = argv[1];
 	if (argc > 2) filename = argv[2];
@@ -785,7 +808,7 @@ int main (int argc,char **argv)
 		fseek(fp, 0, SEEK_END);
 		off_t file_length = ftello(fp);
 		fseek(fp, 0, SEEK_SET);
-		u64 num_pages = file_length / 2112;
+		u64 num_pages = file_length / (page_size + spare_size);
 		printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
 			file_length, num_pages, num_pages / 64);
 		for (; blockno < (num_pages / 64); blockno++) {
@@ -800,9 +823,9 @@ int main (int argc,char **argv)
 		u32 blockno;
 
 		blockno = start_block;
-		length = 553648128ULL - blockno * 0x40ULL * 2112ULL;
+		length = 553648128ULL - blockno * 0x40ULL * (page_size + spare_size);
 		printf("Dumping flash @ 0x%"PRIx64" (0x%"PRIx64" bytes) into %s\n", 
-				blockno*0x40 * 2112ULL, length, filename);
+				blockno*0x40ULL * (page_size + spare_size), length, filename);
 
 		FILE *fp = fopen(filename, "wb");
 		if(!fp) {
