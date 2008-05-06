@@ -20,6 +20,7 @@ For more information, contact bushing@gmail.com, or see http://code.google.com/p
 
 #include <stdio.h>
 #include <math.h>
+#include <inttypes.h>
 #include <usb.h>
 #include <string.h>
 #include <stdarg.h>
@@ -32,6 +33,9 @@ For more information, contact bushing@gmail.com, or see http://code.google.com/p
 #define ftello ftello64
 #define usleep(x) _sleep((x)/1000)
 #endif
+
+#define ENDPOINT_READ 0x81
+#define ENDPOINT_WRITE 1
 
 #define INFECTUS_NAND_CMD 0x4e
 #define INFECTUS_NAND_SEND 0x1
@@ -130,7 +134,7 @@ int infectus_sendcommand(u8 *buf, int len, int maxsize) {
 	int ret = 0;
 start:
 		while (ret < len) {
-		ret = usb_bulk_write(h,1,(char *)buf,len,500);
+		ret = usb_bulk_write(h, ENDPOINT_WRITE, (char *)buf, len, 500);
 		if (ret < 0) {
 			printf("Error %d sending command: %s\n", ret, usb_strerror());
 			return ret;
@@ -140,7 +144,7 @@ start:
 		}
 	}
 
-	ret=usb_bulk_read(h,1,(char *)buf,maxsize,500);	
+	ret=usb_bulk_read(h, ENDPOINT_READ, (char *)buf, maxsize, 500);	
 	if(ret < 0) {
 		printf("Error reading reply: %d\n", ret);
 		return ret;		
@@ -204,8 +208,8 @@ int infectus_reset(void) {
 	ret = usb_set_altinterface(h,0);
 	if (ret) printf("alt_stat=%d\n",ret);
 	
-	ret = usb_clear_halt(h, 1);
-	if (ret) printf("usb_clear_halt(1)=%d (%s)\n",ret, usb_strerror());
+	ret = usb_clear_halt(h, ENDPOINT_READ);
+	if (ret) printf("usb_clear_halt(%x)=%d (%s)\n", ENDPOINT_READ, ret, usb_strerror());
 
 	/* What does this do? */
 	ret = usb_control_msg(h, USB_TYPE_VENDOR + USB_RECIP_DEVICE, 
@@ -436,7 +440,8 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 	unsigned long long usec;
 	int pageno, p, miscompares=0;
 //	printf("flash_program_block(0x%x)\n", blockno);
-	printf("%04x: ", blockno); fflush(stdout);
+//	printf("                                                      \r");
+	printf("\r%04x: ", blockno); fflush(stdout);
 	timer_start();
 	for(pageno = run_fast?2:0; pageno < 0x40; pageno += (run_fast?0x4:1)) {
 		p = blockno*0x40 + pageno;
@@ -450,7 +455,7 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 	usec = timer_end();
 	float rate = (float)blocks_done / (time(NULL) - start_time);
 	int secs_remaining = (4096 - blockno) / rate;
-	if (blocks_done > 2) printf (" %04.1f%%, %d:%02d remaining ", 
+	if (blocks_done > 2) printf ("%04.1f%%, %d:%02d remaining ", 
 		p * 100.0 / (4096 * 0x40), 
 		secs_remaining / 60, secs_remaining % 60);
 	if (debug_mode) printf ("Read(%.3f)", usec / 1000000.0f);
@@ -489,7 +494,8 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 int flash_dump_block(FILE *fp, unsigned int blockno) {
 	u8 buf[2112];
 	int pageno, p, ret;
-	printf("%04x: ", blockno); fflush(stdout);
+	printf("\r                                                                     ");
+	printf("\r%04x", blockno); fflush(stdout);
 
 	for(pageno = 0; pageno < 0x40; pageno++) {
 		p = blockno*0x40 + pageno;
@@ -507,11 +513,14 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 	}
 	float rate = (float)blocks_done / (time(NULL) - start_time);
 	int secs_remaining = (4096 - blockno) / rate;
-	if (blocks_done > 2) 
-		printf (" %04.1f%% (%d:%02d) \r", 
-			p * 100.0 / (4096 * 0x40), 
-			secs_remaining / 60, secs_remaining % 60);
-	else putchar('\r');
+	if (blocks_done > 2) {
+		printf ("%04.1f%% ",p * 100.0 / (4096 * 0x40));
+		if (secs_remaining > 180) {
+			printf("%dm\r", secs_remaining/60);
+		} else {
+			printf("%ds\r", secs_remaining);
+		}
+	} else putchar('\r');
 	fflush(stdout);
 	blocks_done++;
 	return 0;
@@ -554,7 +563,7 @@ int check_file_ecc(char *filename) {
 	off_t file_length = ftello(fp);
 	fseek(fp, 0, SEEK_SET);
 	u64 num_pages = file_length / 2112;
-	printf("File size: %llu bytes / %llu pages / %llu blocks\n", 
+	printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
 		file_length, num_pages, num_pages / 64);
 	for (pageno = 0; pageno < num_pages && !feof(fp); pageno++) {
 		u8 buf[4096];
@@ -604,7 +613,7 @@ int check_file_validity(FILE *fp) {
 	
 	if (file_size % 2112) {
 		printf("WARNING:  This file does not seem to be a valid dump file,\n");
-		printf("          because its filesize (%llu) is not a multiple of 2112\n", file_size);
+		printf("          because its filesize (%"PRIu64") is not a multiple of 2112\n", file_size);
 	}
 	
 	fseeko(fp, 0, SEEK_SET);
@@ -715,7 +724,8 @@ int main (int argc,char **argv)
 		off_t file_length = ftello(fp);
 		fseek(fp, 0, SEEK_SET);
 		u64 num_pages = file_length / 2112;
-		printf("File size: %llu bytes / %llu pages / %llu blocks\n", file_length, num_pages, num_pages / 64);
+		printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
+			file_length, num_pages, num_pages / 64);
 		for (; blockno < (num_pages / 64); blockno++) {
 			flash_program_block(fp, blockno);
 		}
@@ -729,10 +739,10 @@ int main (int argc,char **argv)
 
 		blockno = start_block;
 		length = 553648128ULL - blockno * 0x40ULL * 2112ULL;
-		printf("Dumping flash @ 0x%llx (0x%llx bytes) into %s\n", 
-				blockno*0x40ULL*2112ULL, length, filename);
+		printf("Dumping flash @ 0x%"PRIx64" (0x%"PRIx64" bytes) into %s\n", 
+				blockno*0x40 * 2112ULL, length, filename);
 
-		FILE *fp = fopen(filename, "w");
+		FILE *fp = fopen(filename, "wb");
 		if(!fp) {
 			perror("Couldn't open file for writing: ");
 			exit(1);
@@ -810,9 +820,6 @@ usb_dev_handle *locate_infectus(void)
   if (device_handle==0) return (0);
   else return (device_handle);  	
 }
-
-
-
 
    
 
