@@ -675,8 +675,8 @@ void usb_exit_handler(void) {
 }
 
 int check_file_validity(FILE *fp) {
-	off_t original_offset;
-	off_t file_size;
+	u64 original_offset;
+	u64 file_size;
 	u8 header_magic[4];
 	
 	original_offset = ftello(fp);
@@ -806,7 +806,7 @@ int main (int argc,char **argv)
 		}
 		check_file_validity(fp);
 		fseek(fp, 0, SEEK_END);
-		off_t file_length = ftello(fp);
+		u64 file_length = ftello(fp);
 		fseek(fp, 0, SEEK_SET);
 		u64 num_pages = file_length / (page_size + spare_size);
 		printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
