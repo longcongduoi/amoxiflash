@@ -53,6 +53,8 @@ For more information, contact bushing@gmail.com, or see http://code.google.com/p
 #define NAND_WRITE_PRE 0x80
 #define NAND_WRITE_POST 0x10
 
+#define PAGEBUF_SIZE 4096
+
 usb_dev_handle *locate_infectus(void);
 
 struct usb_dev_handle *h;
@@ -63,7 +65,10 @@ int run_fast = 0;
 int subpage_size = 0x2c0;
 int page_size = 2048;
 int spare_size = 64;
+int num_blocks = 4096;
+int pages_per_block = 64;
 int verify_after_write = 1;
+int chip_select = 0;
 int force = 0;
 int debug_mode = 0;
 int test_mode = 0;
@@ -195,7 +200,7 @@ int infectus_nand_receive(u8 *buf, int len) {
 }
 
 int infectus_nand_send(u8 *buf, int len) {
-	u8 temp_buf[4096];
+	u8 temp_buf[PAGEBUF_SIZE];
 	memset(temp_buf, 0, sizeof temp_buf);
 
 	memcpy(temp_buf, "\x4e\x01\x00\x00\x00\x00", 8);
@@ -203,7 +208,7 @@ int infectus_nand_send(u8 *buf, int len) {
 	temp_buf[7] = len%256;
 	memcpy(temp_buf+8, buf, len);
 	
-	int retval = infectus_sendcommand(temp_buf, len+8, 4096);
+	int retval = infectus_sendcommand(temp_buf, len+8, PAGEBUF_SIZE);
 	if (retval < 0) return retval;
 	if (retval > len) retval = len - 1;
 	memcpy(buf, temp_buf, retval);
@@ -282,10 +287,10 @@ int infectus_check_pld_id(void) {
 	} else {
 		printf("PLD ID: %s\n", pld_ids[buf[1]]);
 	}
-	if (buf[1] != 7 && buf[1] != 4) {
+/*	if (buf[1] != 7 && buf[1] != 4) {
 		fprintf(stderr, "WARNING: If you experience problems, please try reprogramming the Infectus\n");
 		fprintf(stderr, "chip with the 'NAND Programmer' or 'XDowngrader' firmwares and try again.\n");
-	}
+	} */
 	return 0;
 }
 
@@ -343,7 +348,7 @@ int infectus_getflashid(void) {
 /* Erase a block of flash memory. */
 int infectus_eraseblock(unsigned int blockno) {
 	u8 buf[128];
-	unsigned int pageno = blockno * 0x40;
+	unsigned int pageno = blockno * pages_per_block;
 	int ret, len;
 
 	if (test_mode) return 0;
@@ -362,7 +367,7 @@ int infectus_eraseblock(unsigned int blockno) {
 
 int infectus_readflashpage(u8 *dstbuf, unsigned int pageno) {
 	u8 buf[128];
-	u8 flash_buf[4096];
+	u8 flash_buf[PAGEBUF_SIZE];
 	int ret, len, subpage;
 	
 	len=infectus_nand_command(buf, 5, NAND_READ_PRE, 0, 
@@ -399,8 +404,8 @@ int mem_compare(u8 *buf1, u8 *buf2, int size) {
 }
 
 int flash_compare(FILE *fp, unsigned int pageno) {
-	u8 buf1[4096], buf2[4096];
-//	u8 buf3[4096];
+	u8 buf1[PAGEBUF_SIZE], buf2[PAGEBUF_SIZE];
+//	u8 buf3[PAGEBUF_SIZE];
 	int x;
 	file_readflashpage(fp, buf1, pageno);
 	if (check_ecc(buf1)==ECC_WRONG) {
@@ -452,26 +457,27 @@ int infectus_writeflashpage(u8 *dstbuf, unsigned int pageno) {
 }
 
 int flash_program_block(FILE *fp, unsigned int blockno) {
-	u8 buf[4096];
+	u8 buf[PAGEBUF_SIZE];
 	unsigned long long usec;
 	int pageno, p, miscompares=0;
 	printf("\r                                                                     ");
 	printf("\r%04x", blockno); fflush(stdout);
 	timer_start();
-	for(pageno = run_fast?2:0; pageno < 0x40; pageno += (run_fast?0x4:1)) {
-		p = blockno*0x40 + pageno;
+	for(pageno = run_fast?2:0; pageno < pages_per_block; pageno += (run_fast?0x4:1)) {
+		p = blockno*pages_per_block + pageno;
 		if (flash_compare(fp, p)) {
 			putchar('x');
 			miscompares++;
-			if (run_fast) break;
+// 			if (run_fast) break;   I can't think of a reason not to do this, so ...
+			break;
 			} else putchar('=');
 		fflush(stdout);
 	}
 	usec = timer_end();
 	float rate = (float)blocks_done / (time(NULL) - start_time);
-	int secs_remaining = (4096 - blockno) / rate;
+	int secs_remaining = (num_blocks - blockno) / rate;
 	if (blocks_done > 2) {
-		printf ("%04.1f%% ",p * 100.0 / (4096 * 0x40));
+		printf ("%04.1f%% ",blockno * 100.0 / num_blocks);
 		if (secs_remaining > 180) {
 			printf("%dm\r", secs_remaining/60);
 		} else {
@@ -486,8 +492,8 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 		infectus_eraseblock(blockno);
 		printf("\nProg: ");
 		timer_start();
-		for(pageno = 0; pageno < 0x40; pageno++) {
-			p = blockno*0x40 + pageno;
+		for(pageno = 0; pageno < pages_per_block; pageno++) {
+			p = blockno*pages_per_block + pageno;
 			if (file_readflashpage(fp, buf, p)==(page_size + spare_size)) {
 				if(flash_isFF(buf, (page_size + spare_size))) {
 					putchar('F');
@@ -512,13 +518,13 @@ int flash_program_block(FILE *fp, unsigned int blockno) {
 }
 
 int flash_dump_block(FILE *fp, unsigned int blockno) {
-	u8 buf[4096];
+	u8 buf[PAGEBUF_SIZE];
 	int pageno, p, ret;
 	printf("\r                                                                     ");
 	printf("\r%04x", blockno); fflush(stdout);
 
-	for(pageno = 0; pageno < 0x40; pageno++) {
-		p = blockno*0x40 + pageno;
+	for(pageno = 0; pageno < pages_per_block; pageno++) {
+		p = blockno*pages_per_block + pageno;
 		ret = infectus_readflashpage(buf, p);
 		if (ret==(page_size + spare_size)) {
 			if (check_ecc(buf)==ECC_WRONG) {
@@ -532,9 +538,9 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 		}
 	}
 	float rate = (float)blocks_done / (time(NULL) - start_time);
-	int secs_remaining = (4096 - blockno) / rate;
+	int secs_remaining = (num_blocks - blockno) / rate;
 	if (blocks_done > 2) {
-		printf ("%04.1f%% ",p * 100.0 / (4096 * 0x40));
+		printf ("%04.1f%% ",blockno * 100.0 / num_blocks);
 		if (secs_remaining > 180) {
 			printf("%dm\r", secs_remaining/60);
 		} else {
@@ -551,6 +557,7 @@ void usage(void) {
 	fprintf(stderr, "          -t            test mode -- do not erase or write\n");
 	fprintf(stderr, "          -v            verify every byte of written data\n");
 	fprintf(stderr, "          -w            wait for status after programming\n");
+	fprintf(stderr, "          -x {0,1}      on a dual NAND programmer, choose chip\n");
 	fprintf(stderr, "          -f            force: ignore safety checks. Dangerous!\n");
 	fprintf(stderr, "          -d            debug (enable debugging output)\n");
 	fprintf(stderr, "          -b blocksize  set blocksize; see docs for more info.  Default: 0x%x\n", subpage_size);
@@ -600,10 +607,10 @@ int strip_file_ecc(char *filename) {
 	
 	u64 num_pages = file_length / (page_size + spare_size);
 	printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
-		file_length, num_pages, num_pages / 64);
+		file_length, num_pages, num_pages / pages_per_block);
 	
 	for (pageno=0; (pageno < num_pages) && !feof(fp); pageno++) {
-		u8 buf[4096];
+		u8 buf[PAGEBUF_SIZE];
 		if ((pageno % 2048)==0) {
 			printf ("\r%04.1f%%  ", pageno * 100.0 / num_pages);
 			draw_spin();
@@ -636,9 +643,9 @@ int check_file_ecc(char *filename) {
 	fseek(fp, 0, SEEK_SET);
 	u64 num_pages = file_length / (page_size + spare_size);
 	printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
-		file_length, num_pages, num_pages / 64);
+		file_length, num_pages, num_pages / pages_per_block);
 	for (pageno = 0; pageno < num_pages && !feof(fp); pageno++) {
-		u8 buf[4096];
+		u8 buf[PAGEBUF_SIZE];
 		file_readflashpage(fp, buf, pageno);
 		if ((pageno % 2048)==0) {
 			printf ("\r%04.1f%%  ", pageno * 100.0 / num_pages);
@@ -711,14 +718,20 @@ int main (int argc,char **argv)
 	if (argc < 2) usage();
 	char *command = argv[1];
 	if (argc > 2) filename = argv[2];
-	optind = 2; // skip cover command
+	optind = 2; // skip over command
 	
-	while ((ch = getopt(argc, argv, "b:tvwdf:s:q")) != -1) {
+	while ((ch = getopt(argc, argv, "b:tvwx:df:s:q")) != -1) {
 		switch (ch) {
 			case 'b': subpage_size = strtol(optarg, NULL, 0); break;
 			case 't': test_mode = 1; break;
 			case 'v': verify_after_write = 1; break;
 			case 'w': check_status = 1; break;
+			case 'x': chip_select = strtol(optarg, NULL, 0); 
+				if (chip_select != 0 && chip_select != 1) {
+					fprintf(stderr, "Invalid chip number -- must be 0 or 1\n");
+					usage();
+				}
+				break;
 			case 'd': debug_mode = 1; break;
 			case 'f': force = 1; break;
 			case 's': start_block = strtol(optarg, NULL, 0); break;
@@ -765,7 +778,7 @@ int main (int argc,char **argv)
 	infectus_get_version();
 	infectus_get_loader_version();
 	infectus_check_pld_id();
-	infectus_selectflash(0);
+	infectus_selectflash(chip_select);
 	usleep(1000);
 	flashid = infectus_getflashid();
 		
@@ -779,10 +792,18 @@ int main (int argc,char **argv)
 
 // todo: make a proper database of chip types
 	switch(flashid) {
-		case 0xECF1: printf("Detected K9F1G08X0A 128Mbyte flash\n"); break;
-		case 0xADDC: printf("Detected Hynix 512Mbyte flash\n"); break;
-		case 0xECDC: printf("Detected Samsung 512Mbyte flash\n"); break;
-		case 0x98DC: printf("Detected Toshiba 512Mbyte flash\n"); break;
+		case 0xECF1: printf("Detected K9F1G08X0A 128Mbyte flash\n"); 
+			num_blocks = 1024;
+			break;
+		case 0xADDC: printf("Detected Hynix 512Mbyte flash\n");
+			num_blocks = 4096;
+			break;
+		case 0xECDC: printf("Detected Samsung 512Mbyte flash\n"); ;
+			num_blocks = 4096;
+			break;	
+		case 0x98DC: printf("Detected Toshiba 512Mbyte flash\n"); ;
+			num_blocks = 4096;
+			break;
 		case 0:
 			printf("No flash chip detected; are you sure target device is powered on?\n");
 			exit(1);
@@ -811,9 +832,18 @@ int main (int argc,char **argv)
 		u64 file_length = ftello(fp);
 		fseek(fp, 0, SEEK_SET);
 		u64 num_pages = file_length / (page_size + spare_size);
+		if (num_pages < (num_blocks * pages_per_block)) {
+			fprintf(stderr, "WARNING: File is too short; file is %u blocks, chip is %u blocks\n",
+				(u32)num_pages, num_blocks * pages_per_block);
+		}
+		if (num_pages > (num_blocks * pages_per_block)) {
+			fprintf(stderr, "WARNING: File is too long; file is %u blocks, chip is %u blocks\n",
+				(u32)num_pages, num_blocks * pages_per_block);
+		}
+
 		printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
-			file_length, num_pages, num_pages / 64);
-		for (; blockno < (num_pages / 64); blockno++) {
+			file_length, num_pages, num_pages / pages_per_block);
+		for (; blockno < num_blocks; blockno++) {
 			flash_program_block(fp, blockno);
 		}
 		fclose(fp);
@@ -821,20 +851,20 @@ int main (int argc,char **argv)
 	}
 
 	if(!strcmp(command, "dump")) {
-		u64 length;
+		u64 length, offset;
 		u32 blockno;
 
-		blockno = start_block;
-		length = 553648128ULL - blockno * 0x40ULL * (page_size + spare_size);
+		length = num_blocks * pages_per_block;
+		offset = start_block * pages_per_block * (page_size + spare_size);
 		printf("Dumping flash @ 0x%"PRIx64" (0x%"PRIx64" bytes) into %s\n", 
-				blockno*0x40ULL * (page_size + spare_size), length, filename);
+				offset, length-offset, filename);
 
 		FILE *fp = fopen(filename, "wb");
 		if(!fp) {
 			perror("Couldn't open file for writing: ");
 			exit(1);
 		}
-		for(; blockno < 4096; blockno++) {
+		for(blockno = start_block; blockno < num_blocks; blockno++) {
 //			printf("\rDumping block %x", blockno); fflush(stdout);
 			flash_dump_block(fp, blockno);
 		}
