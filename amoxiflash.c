@@ -777,7 +777,9 @@ int main (int argc,char **argv)
 		
 	printf("ID = %x\n", flashid);
 
+// todo: make a proper database of chip types
 	switch(flashid) {
+		case 0xECF1: printf("Detected K9F1G08X0A 128Mbyte flash\n"); break;
 		case 0xADDC: printf("Detected Hynix 512Mbyte flash\n"); break;
 		case 0xECDC: printf("Detected Samsung 512Mbyte flash\n"); break;
 		case 0x98DC: printf("Detected Toshiba 512Mbyte flash\n"); break;
