@@ -18,7 +18,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 For more information, contact bushing@gmail.com, or see http://code.google.com/p/amoxiflash
 */
 
-#define VERSION "0.2"
+#define VERSION "0.4"
 
 #include <stdio.h>
 #include <math.h>
@@ -566,9 +566,12 @@ void usage(void) {
 	fprintf(stderr, "\nValid commands are:\n");
 	fprintf(stderr, "         check        check ECC data in file\n");
 	fprintf(stderr, "         strip        strip ECC data from file\n");
+	fprintf(stderr, "         sums         calculate simple checksum for each page of a file\n");
 	fprintf(stderr, "         dump         read from flash chip and dump to file\n");
 	fprintf(stderr, "         program      compare file to flash contents, reprogram flash\n");
 	fprintf(stderr, "                        to match file\n");
+	fprintf(stderr, "         erase        erase the entire flash chip\n");
+
 	exit(1);	
 }
 
@@ -677,6 +680,79 @@ int check_file_ecc(char *filename) {
 	return 1;
 }
 
+/* Precomputed bitcount uses a precomputed array that stores the number of ones
+   in each char. */
+static int bits_in_char [256] ;
+
+/* Iterated bitcount iterates over each bit. The while condition sometimes helps
+   terminates the loop earlier */
+int iterated_bitcount (unsigned int n)
+{
+    int count=0;    
+    while (n)
+    {
+        count += n & 0x1u ;    
+        n >>= 1 ;
+    }
+    return count ;
+}
+void compute_bits_in_char (void)
+{
+    unsigned int i ;    
+    for (i = 0; i < 256; i++)
+        bits_in_char [i] = iterated_bitcount (i) ;
+    return ;
+}
+
+int generate_checksums(char *filename) {
+	u32 pageno;
+	char output_filename[1024];
+	compute_bits_in_char();
+	
+	if (!filename) {
+		fprintf(stderr, "Error: you must specify a filename to check\n");
+		usage();
+	}
+	sprintf(output_filename, "%s.out", filename);
+	printf("Generating sums for file %s, outputting to %s\n", filename, output_filename);
+	start_time = time(NULL);
+	FILE *fp = fopen(filename, "rb");
+	if(!fp) {
+		perror("Couldn't open file: ");
+		exit(1);
+	}
+	fseek(fp, 0, SEEK_END);
+	off_t file_length = ftello(fp);
+	fseek(fp, 0, SEEK_SET);
+	u64 num_pages = file_length / (page_size + spare_size);
+	printf("File size: %"PRIu64" bytes / %"PRIu64" pages / %"PRIu64" blocks\n", 
+		file_length, num_pages, num_pages / pages_per_block);
+		
+	FILE *out_fp = fopen(output_filename, "w");
+	if(!fp) {
+		perror("Couldn't open output file: ");
+		exit(1);
+	}	
+	for (pageno = 0; pageno < num_pages && !feof(fp); pageno++) {
+		u8 buf[PAGEBUF_SIZE];
+		int i;
+		unsigned int sum=0;
+		file_readflashpage(fp, buf, pageno);
+		for (i=0; i<page_size; i++) sum += bits_in_char[buf[i]];
+		fprintf(out_fp, "%x %x\n", pageno, sum);
+		if ((pageno % 2048)==0) {
+			printf ("\r%04.1f%%  ", pageno * 100.0 / num_pages);
+			draw_spin();
+		}
+		
+	}
+	fclose(fp);
+	fclose(out_fp);
+	exit(0);
+	return 1;
+}
+
+
 void usb_exit_handler(void) {
 	usb_close(h);
 }
@@ -764,6 +840,15 @@ int main (int argc,char **argv)
 		exit(retval);
 	}
 	
+	if (!strcmp(command, "sums")) {
+		if (!filename) {
+			fprintf(stderr, "Error: sums requires a filename\n");
+			usage();
+		}
+
+		retval = generate_checksums(filename);
+		exit(retval);
+	}
 	usb_init();
 	atexit(usb_exit_handler);
 //	usb_set_debug(2);
@@ -872,13 +957,16 @@ int main (int argc,char **argv)
 		fclose(fp);
 		exit(0);
 	}
-#if 0		
-	if(!strcmp(argv[argno], "erase")) {
-		int blockno = strtol(argv[argno], NULL, 0);
-		infectus_eraseblock(blockno);
-		continue;
-	}
 
+	if(!strcmp(command, "erase")) {
+	  int blockno;
+	  printf("Erasing %d blocks\n", num_blocks);
+	  for (blockno=0; blockno < num_blocks; blockno++) 
+	    infectus_eraseblock(blockno);
+	  printf("Done!\n");
+	  exit(0);
+	}
+#if 0
 		if(!strcmp(argv[argno], "write")) {
 			unsigned long long begin, length, offset;
 			char *filename;
