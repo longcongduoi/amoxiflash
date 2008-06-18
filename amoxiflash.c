@@ -527,9 +527,9 @@ int flash_dump_block(FILE *fp, unsigned int blockno) {
 		p = blockno*pages_per_block + pageno;
 		ret = infectus_readflashpage(buf, p);
 		if (ret==(page_size + spare_size)) {
-			if (check_ecc(buf)==ECC_WRONG) {
+/*			if (check_ecc(buf)==ECC_WRONG) {
 				printf("warning, invalid ECC for page %d\n", pageno);
-			}
+			} */
 			file_writeflashpage(fp, buf, p);
 			putchar('.');
 			fflush(stdout);
@@ -884,6 +884,9 @@ int main (int argc,char **argv)
 			num_blocks = 4096;
 			break;
 		case 0xECDC: printf("Detected Samsung 512Mbyte flash\n"); ;
+			num_blocks = 4096;
+			break;	
+		case 0x2CDC: printf("Detected Micron 512Mbyte flash\n"); ;
 			num_blocks = 4096;
 			break;	
 		case 0x98DC: printf("Detected Toshiba 512Mbyte flash\n"); ;
