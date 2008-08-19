@@ -48,13 +48,13 @@ Note: the below commands are just meant as examples.  They are correct for the 5
 4e 00 00 00 00 00 00 00 d0    -- erase confirm
 
 4e 00 00 00 00 00 00          -- page read PRE
-   05 00 {o0 o1} {p0 p1 p2}   {p2, p1, p0} is 24-bit page number
+   05 00 {o0 o1} {p0 p1 p2}      {p2, p1, p0} is 24-bit page number
                                  {o1, o0} is offset within the block (usually 0)
 
 4e 00 00 00 00 00 00 00 30    -- page read confirm
 
 4e 00 00 00 00 00 00          -- page program PRE
-   05 80 {o0 o1} {p0 p1 p2}   {p2, p1, p0} is 24-bit page number
+   05 80 {o0 o1} {p0 p1 p2}      {p2, p1, p0} is 24-bit page number
                                  {o1, o0} is offset within the block (see discussion below)
 
 4e 00 00 00 00 00 00 00 10    -- page program confirm
