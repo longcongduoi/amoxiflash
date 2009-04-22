@@ -923,6 +923,7 @@ int main (int argc,char **argv)
 		if (num_pages < (num_blocks * pages_per_block)) {
 			fprintf(stderr, "WARNING: File is too short; file is %u blocks, chip is %u blocks\n",
 				(u32)num_pages, num_blocks * pages_per_block);
+			num_blocks = num_pages / pages_per_block;			
 		}
 		if (num_pages > (num_blocks * pages_per_block)) {
 			fprintf(stderr, "WARNING: File is too long; file is %u blocks, chip is %u blocks\n",
