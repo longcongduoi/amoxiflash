@@ -1,4 +1,4 @@
-CFLAGS	= -g -O2 -Wall
+CFLAGS	= -g -O2 -Wall -arch i386
 LDFLAGS	= -g -lusb -lm
 
 all: amoxiflash
