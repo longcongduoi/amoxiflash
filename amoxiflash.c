@@ -320,9 +320,9 @@ int infectus_getstatus(void) {
 /* Wait for NAND flash to be ready */
 void wait_flash(void) {
 	int status=0;
-	while (status != 0xc0) {
+	while (status != 0xe0) {
 		status = infectus_getstatus();
-		if(status != 0xc0) printf("Status = %x\n", status);
+		if(status != 0xe0) printf("Status = %x\n", status);
 	}
 }
 
@@ -818,7 +818,7 @@ int main (int argc,char **argv)
 	}
 	argc -= optind;
 	argv += optind;
-	if (argc > 1) filename = argv[1];
+	if (argc > 0) filename = argv[0];
 
 	if (debug_mode) {
 		printf("command = %s\n", command);
@@ -881,10 +881,10 @@ int main (int argc,char **argv)
 	usleep(1000);
 	flashid = infectus_getflashid();
 		
-	printf("ID = %x\n", flashid);
+//	printf("ID = %x\n", flashid);
 	flashid = infectus_getflashid();
 		
-	printf("ID = %x\n", flashid);
+//	printf("ID = %x\n", flashid);
 	flashid = infectus_getflashid();
 		
 	printf("ID = %x\n", flashid);
