@@ -18,7 +18,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 For more information, contact bushing@gmail.com, or see http://code.google.com/p/amoxiflash
 */
 
-#define VERSION "0.4"
+#define VERSION "0.5"
 
 #include <stdio.h>
 #include <math.h>
@@ -89,7 +89,7 @@ void draw_spin(void) {
 }
 
 static const char *pld_ids[] = {
-	  "O2MOD",
+      "O2MOD",
       "Globe Hitachi",
       "Globe Samsung",
       "Infectus 78",
@@ -789,11 +789,10 @@ int main (int argc,char **argv)
 	char *filename = NULL;
 	
 	progname = argv[0];
-	printf("amoxiflash version %s, (c) 2008 bushing\n", VERSION);
+	printf("amoxiflash version %s, (c) 2008,2009 bushing\n", VERSION);
 	
 	if (argc < 2) usage();
 	char *command = argv[1];
-	if (argc > 2) filename = argv[2];
 	optind = 2; // skip over command
 	
 	while ((ch = getopt(argc, argv, "b:tvwx:df:s:q")) != -1) {
@@ -819,6 +818,21 @@ int main (int argc,char **argv)
 	}
 	argc -= optind;
 	argv += optind;
+	if (argc > 1) filename = argv[1];
+
+	if (debug_mode) {
+		printf("command = %s\n", command);
+		printf("subpage_size = %x\n", subpage_size);
+		printf("test_mode = %x\n", test_mode);
+		printf("verify_after_write = %x\n", verify_after_write);
+		printf("check_status = %x\n", check_status);
+		printf("chip_select = %x\n", chip_select);
+		printf("debug_mode = %x\n", debug_mode);
+		printf("force = %x\n", force);
+		printf("start_block = %x\n", start_block);
+		printf("quick_check = %x\n", quick_check);
+		printf("filename = %s\n", filename);
+	}
 
 	if (!strcmp(command, "check")) {
 		if (!filename) {
